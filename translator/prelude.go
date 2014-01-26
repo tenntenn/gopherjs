@@ -43,7 +43,6 @@ var go$newType = function(size, kind, string, name, pkgPath, constructor) {
 	case "Uintptr":
 	case "Float32":
 	case "Float64":
-	case "String":
 	case "UnsafePointer":
 		typ = function(v) { this.go$val = v; };
 		typ.prototype.go$key = function() { return string + "$" + this.go$val; };
@@ -175,6 +174,7 @@ var go$newType = function(size, kind, string, name, pkgPath, constructor) {
 		break;
 
 	case "Slice":
+	case "String":
 		var nativeArray;
 		typ = function(array) {
 			if (array.constructor !== nativeArray) {
@@ -204,6 +204,10 @@ var go$newType = function(size, kind, string, name, pkgPath, constructor) {
 				rt.sliceType = new go$reflect.sliceType(rt, elem.reflectType());
 			};
 		};
+		if (kind === "String") {
+			nativeArray = Uint8Array;
+			typ.prototype.go$key = function() { return String.fromCharCode.apply(null, this.array.subarray(this.offset, this.offset + this.length)); };
+		}
 		break;
 
 	case "Struct":
@@ -292,6 +296,8 @@ var Go$Complex64     = go$newType( 8, "Complex64",     "complex64",      "comple
 var Go$Complex128    = go$newType(16, "Complex128",    "complex128",     "complex128", "", null);
 var Go$String        = go$newType( 0, "String",        "string",         "string",     "", null);
 var Go$UnsafePointer = go$newType( 4, "UnsafePointer", "unsafe.Pointer", "Pointer",    "", null);
+
+var go$emptyString = new Go$String([]);
 
 var go$nativeArray = function(elemKind) {
 	return ({ Int: Int32Array, Int8: Int8Array, Int16: Int16Array, Int32: Int32Array, Uint: Uint32Array, Uint8: Uint8Array, Uint16: Uint16Array, Uint32: Uint32Array, Uintptr: Uint32Array, Float32: Float32Array, Float64: Float64Array })[elemKind] || Array;
@@ -475,6 +481,7 @@ go$newStringPtr = function(str) {
 	}
 	var ptr = go$stringPtrMap[str];
 	if (ptr === undefined) {
+		str = go$internalize(str, Go$String);
 		ptr = new (go$ptrType(Go$String))(function() { return str; }, function(v) { str = v; });
 		go$stringPtrMap[str] = ptr;
 	}
@@ -701,9 +708,17 @@ var go$sliceToArray = function(slice) {
 	return slice.array.slice(slice.offset, slice.offset + slice.length);
 };
 
-var go$decodeRune = function(str, pos) {
-	var c0 = str.charCodeAt(pos);
+var go$cloneSlice = function(str, terminateWithNull) {
+	var array = new Uint8Array(terminateWithNull ? str.length + 1 : str.length), i;
+	array.set(str.array.subarray(str.offset, str.offset + str.length));
+	if (terminateWithNull) {
+		array[str.length] = 0;
+	}
+	return array;
+};
 
+var go$decodeRune = function(byteAt) {
+	var c0 = byteAt(0);
 	if (c0 < 0x80) {
 		return [c0, 1];
 	}
@@ -712,7 +727,7 @@ var go$decodeRune = function(str, pos) {
 		return [0xFFFD, 1];
 	}
 
-	var c1 = str.charCodeAt(pos + 1);
+	var c1 = byteAt(1);
 	if (c1 !== c1 || c1 < 0x80 || 0xC0 <= c1) {
 		return [0xFFFD, 1];
 	}
@@ -725,7 +740,7 @@ var go$decodeRune = function(str, pos) {
 		return [r, 2];
 	}
 
-	var c2 = str.charCodeAt(pos + 2);
+	var c2 = byteAt(2);
 	if (c2 !== c2 || c2 < 0x80 || 0xC0 <= c2) {
 		return [0xFFFD, 1];
 	}
@@ -741,7 +756,7 @@ var go$decodeRune = function(str, pos) {
 		return [r, 3];
 	}
 
-	var c3 = str.charCodeAt(pos + 3);
+	var c3 = byteAt(3);
 	if (c3 !== c3 || c3 < 0x80 || 0xC0 <= c3) {
 		return [0xFFFD, 1];
 	}
@@ -762,44 +777,27 @@ var go$encodeRune = function(r) {
 		r = 0xFFFD;
 	}
 	if (r <= 0x7F) {
-		return String.fromCharCode(r);
+		return [r];
 	}
 	if (r <= 0x7FF) {
-		return String.fromCharCode(0xC0 | r >> 6, 0x80 | (r & 0x3F));
+		return [0xC0 | r >> 6, 0x80 | (r & 0x3F)];
 	}
 	if (r <= 0xFFFF) {
-		return String.fromCharCode(0xE0 | r >> 12, 0x80 | (r >> 6 & 0x3F), 0x80 | (r & 0x3F));
+		return [0xE0 | r >> 12, 0x80 | (r >> 6 & 0x3F), 0x80 | (r & 0x3F)];
 	}
-	return String.fromCharCode(0xF0 | r >> 18, 0x80 | (r >> 12 & 0x3F), 0x80 | (r >> 6 & 0x3F), 0x80 | (r & 0x3F));
-};
-
-var go$stringToBytes = function(str, terminateWithNull) {
-	var array = new Uint8Array(terminateWithNull ? str.length + 1 : str.length), i;
-	for (i = 0; i < str.length; i += 1) {
-		array[i] = str.charCodeAt(i);
-	}
-	if (terminateWithNull) {
-		array[str.length] = 0;
-	}
-	return array;
-};
-
-var go$bytesToString = function(slice) {
-	if (slice.length === 0) {
-		return "";
-	}
-	var str = "", i;
-	for (i = 0; i < slice.length; i += 10000) {
-		str += String.fromCharCode.apply(null, slice.array.subarray(slice.offset + i, slice.offset + Math.min(slice.length, i + 10000)));
-	}
-	return str;
+	return [0xF0 | r >> 18, 0x80 | (r >> 12 & 0x3F), 0x80 | (r >> 6 & 0x3F), 0x80 | (r & 0x3F)];
 };
 
 var go$stringToRunes = function(str) {
 	var array = new Int32Array(str.length);
 	var rune, i, j = 0;
 	for (i = 0; i < str.length; i += rune[1], j += 1) {
-		rune = go$decodeRune(str, i);
+		rune = go$decodeRune(function(n) {
+			if (i + n >= str.length) {
+				return 0/0;
+			}
+			return str.array[str.offset + i + n];
+		});
 		array[j] = rune[0];
 	}
 	return array.subarray(0, j);
@@ -809,11 +807,11 @@ var go$runesToString = function(slice) {
 	if (slice.length === 0) {
 		return "";
 	}
-	var str = "", i;
+	var a = [], i;
 	for (i = 0; i < slice.length; i += 1) {
-		str += go$encodeRune(slice.array[slice.offset + i]);
+		a = a.concat(go$encodeRune(slice.array[slice.offset + i]));
 	}
-	return str;
+	return a;
 };
 
 var go$needsExternalization = function(t) {
@@ -907,7 +905,7 @@ var go$externalize = function(v, t) {
 	case "String":
 		var s = "", r, i, j = 0;
 		for (i = 0; i < v.length; i += r[1], j += 1) {
-			r = go$decodeRune(v, i);
+			r = go$decodeRune(function(n) { return v.charCodeAt(i + n); });
 			s += String.fromCharCode(r[0]);
 		}
 		return s;
@@ -1019,7 +1017,7 @@ var go$internalize = function(v, t) {
 			var mapType = go$mapType(Go$String, go$interfaceType([]));
 			return new mapType(go$internalize(v, mapType));
 		case String:
-			return new Go$String(go$internalize(v, Go$String));
+			return go$internalize(v, Go$String);
 		}
 		return v;
 	case "Map":
@@ -1034,11 +1032,11 @@ var go$internalize = function(v, t) {
 		return new t(go$mapArray(v, function(e) { return go$internalize(e, t.elem); }));
 	case "String":
 		v = String(v);
-		var s = "", i;
+		var a = [], i;
 		for (i = 0; i < v.length; i += 1) {
-			s += go$encodeRune(v.charCodeAt(i));
+			a = a.concat(go$encodeRune(v.charCodeAt(i)));
 		}
-		return s;
+		return new Go$String(a);
 	default:
 		return v;
 	}
@@ -1246,6 +1244,8 @@ var go$interfaceIsEqual = function(a, b) {
 	case "Slice":
 	case "Struct":
 		go$throwRuntimeError("comparing uncomparable type " + a.constructor);
+	case "String":
+		return go$compareStrings(a, b) === 0;
 	case undefined: // js.Object
 		return a === b;
 	default:
@@ -1263,6 +1263,16 @@ var go$arrayIsEqual = function(a, b) {
 		}
 	}
 	return true;
+};
+var go$compareStrings = function(a, b) {
+	var i;
+	for (i = 0; i < a.length && i < b.length; i++) {
+		var d = a.array[a.offset + i] - b.array[b.offset + i];
+		if (d !== 0) {
+			return d;
+		}
+	}
+	return a.length - b.length;
 };
 var go$sliceIsEqual = function(a, ai, b, bi) {
 	return a.array === b.array && a.offset + ai === b.offset + bi;

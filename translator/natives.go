@@ -222,7 +222,15 @@ func init() {
 
 	pkgNatives["os"] = map[string]string{
 		"init": `
-			go$pkg.Args = new (go$sliceType(Go$String))((typeof process !== 'undefined') ? process.argv.slice(1) : []);
+			if (typeof process === 'undefined') {
+				go$pkg.Args = new (go$sliceType(Go$String))(new Array(0));
+			} else {
+				go$pkg.Args = new (go$sliceType(Go$String))(new Array(process.argv.length - 1));
+				var i;
+				for (i = 1; i < process.argv.length; i++) {
+					go$pkg.Args.array[i - 1] = go$internalize(process.argv[i], Go$String);
+				}
+			}
 			if (go$packages["runtime"].GOOS === "windows") {
 				NewFile = function() { return new File.Ptr(); };
 			}
@@ -243,7 +251,7 @@ func init() {
 				return [0, "", 0, false];
 			}
 			var parts = line.substring(line.indexOf("(") + 1, line.indexOf(")")).split(":");
-			return [0, parts[0], parseInt(parts[1]), true];
+			return [0, go$internalize(parts[0], Go$String), parseInt(parts[1]), true];
 		}`,
 		"GC": `function() {}`,
 		"GOMAXPROCS": `function(n) {
@@ -263,7 +271,15 @@ func init() {
 	}
 
 	pkgNatives["strings"] = map[string]string{
-		"IndexByte": `function(s, c) { return s.indexOf(String.fromCharCode(c)); }`,
+		"IndexByte": `function(s, c) {
+			var i;
+			for (i = 0; i < s.length; i++) {
+				if (s.array[s.offset + i] === c) {
+					return i;
+				}
+			}
+			return -1;
+		}`,
 	}
 
 	pkgNatives["sync"] = map[string]string{
@@ -338,7 +354,7 @@ func init() {
 				Syscall = Syscall6 = Syscall9 = Syscall12 = Syscall15 = loadlibrary = getprocaddress = function() { throw "Syscalls not available." };
 				getStdHandle = GetCommandLine = function() {};
 				CommandLineToArgv = function() { return [null, {}]; };
-				Getenv = function(key) { return ["", false]; };
+				Getenv = function(key) { return [new Go$String([]), false]; };
 			} else if (typeof process === "undefined") {
 				go$pkg.go$setSyscall = function(f) {
 					Syscall = Syscall6 = RawSyscall = RawSyscall6 = f;
@@ -351,13 +367,13 @@ func init() {
 				Syscall6 = syscall.Syscall6;
 				RawSyscall = syscall.Syscall;
 				RawSyscall6 = syscall.Syscall6;
-				BytePtrFromString = function(s) { return [go$stringToBytes(s, true), null]; };
+				BytePtrFromString = function(s) { return [go$cloneSlice(s, true), null]; };
 
 				var envkeys = Object.keys(process.env);
 				envs = new (go$sliceType(Go$String))(new Array(envkeys.length));
 				var i;
 				for(i = 0; i < envkeys.length; i += 1) {
-					envs.array[i] = envkeys[i] + "=" + process.env[envkeys[i]];
+					envs.array[i] = go$internalize(envkeys[i] + "=" + process.env[envkeys[i]], Go$String);
 				}
 			}
 		`,
@@ -370,14 +386,14 @@ func init() {
 					console.log("?   \t" + pkgPath + "\t[no test files]");
 					return;
 				}
-				os.Open(dir)[0].Chdir();
+				os.Open(go$internalize(dir, Go$String))[0].Chdir();
 				var start = time.Now(), status = "ok  ", i;
 				for (i = 0; i < tests.length; i += 1) {
-					var t = new T.Ptr(new common.Ptr(undefined, undefined, undefined, undefined, time.Now(), undefined, undefined, undefined), names[i], null);
+					var t = new T.Ptr(new common.Ptr(undefined, undefined, undefined, undefined, time.Now(), undefined, undefined, undefined), go$internalize(names[i], Go$String), null);
 					var err = null;
 					try {
 						if (chatty.go$get()) {
-							console.log("=== RUN " + t.name);
+							console.log("=== RUN " + names[i]);
 						}
 						tests[i](t);
 					} catch (e) {
@@ -403,7 +419,7 @@ func init() {
 					}
 				}
 				var duration = time.Now().Sub(start);
-				fmt.Printf("%s\t%s\t%.3fs\n", new (go$sliceType(go$interfaceType([])))([new Go$String(status), new Go$String(pkgPath), new Go$Float64(duration.Seconds())]));
+				fmt.Printf(go$internalize("%s\t%s\t%.3fs\n", Go$String), new (go$sliceType(go$interfaceType([])))([go$internalize(status, Go$String), go$internalize(pkgPath, Go$String), new Go$Float64(duration.Seconds())]));
 			};
 		`,
 	}

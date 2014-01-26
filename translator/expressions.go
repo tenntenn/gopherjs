@@ -42,7 +42,15 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 			}
 			return fmt.Sprintf("new %s(%s, %s)", c.typeName(exprType), strconv.FormatFloat(r, 'g', -1, 64), strconv.FormatFloat(i, 'g', -1, 64))
 		case basic.Info()&types.IsString != 0:
-			return encodeString(exact.StringVal(value))
+			str := exact.StringVal(value)
+			if len(str) == 0 {
+				return "go$emptyString"
+			}
+			bytes := make([]string, len(str))
+			for i, b := range []byte(str) {
+				bytes[i] = strconv.Itoa(int(b))
+			}
+			return fmt.Sprintf("new %s([%s])", c.typeName(exprType), strings.Join(bytes, ", "))
 		default:
 			panic("Unhandled constant type: " + basic.String())
 		}
@@ -218,7 +226,9 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 			t = t2
 		}
 
-		if basic, isBasic := t.Underlying().(*types.Basic); isBasic && basic.Info()&types.IsNumeric != 0 {
+		basic, isBasic := t.Underlying().(*types.Basic)
+
+		if isBasic && basic.Info()&types.IsNumeric != 0 {
 			if is64Bit(basic) {
 				switch e.Op {
 				case token.MUL:
@@ -327,6 +337,19 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 			}
 		}
 
+		if isBasic && basic.Info()&types.IsString != 0 {
+			switch e.Op {
+			case token.ADD:
+				return fmt.Sprintf("go$appendSlice(%s, %s)", c.translateExpr(e.X), c.translateExpr(e.Y))
+			case token.EQL:
+				return fmt.Sprintf("go$compareStrings(%s, %s) === 0", c.translateExpr(e.X), c.translateExpr(e.Y))
+			case token.LSS, token.LEQ, token.GTR, token.GEQ:
+				return fmt.Sprintf("go$compareStrings(%s, %s) %s 0", c.translateExpr(e.X), c.translateExpr(e.Y), e.Op)
+			default:
+				panic(e.Op)
+			}
+		}
+
 		switch e.Op {
 		case token.ADD, token.LSS, token.LEQ, token.GTR, token.GEQ:
 			return fmt.Sprintf("%s %s %s", c.translateExpr(e.X), e.Op, c.translateExpr(e.Y))
@@ -405,7 +428,7 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 		switch t := c.info.Types[e.X].Underlying().(type) {
 		case *types.Array, *types.Pointer:
 			return fmt.Sprintf("%s[%s]", c.translateExpr(e.X), c.flatten64(e.Index))
-		case *types.Slice:
+		case *types.Slice, *types.Basic:
 			sliceVar := c.newVariable("_slice")
 			indexVar := c.newVariable("_index")
 			return fmt.Sprintf(`(%s = %s, %s = %s, (%s >= 0 && %s < %s.length) ? %s.array[%s.offset + %s] : go$throwRuntimeError("index out of range"))`, sliceVar, c.translateExpr(e.X), indexVar, c.flatten64(e.Index), indexVar, indexVar, sliceVar, sliceVar, sliceVar, indexVar)
@@ -415,31 +438,21 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 				return fmt.Sprintf(`(%[1]s = %[2]s[%[3]s], %[1]s !== undefined ? [%[1]s.v, true] : [%[4]s, false])`, c.newVariable("_entry"), c.translateExpr(e.X), key, c.zeroValue(t.Elem()))
 			}
 			return fmt.Sprintf(`(%[1]s = %[2]s[%[3]s], %[1]s !== undefined ? %[1]s.v : %[4]s)`, c.newVariable("_entry"), c.translateExpr(e.X), key, c.zeroValue(t.Elem()))
-		case *types.Basic:
-			return fmt.Sprintf("%s.charCodeAt(%s)", c.translateExpr(e.X), c.flatten64(e.Index))
 		default:
 			panic(fmt.Sprintf("Unhandled IndexExpr: %T\n", t))
 		}
 
 	case *ast.SliceExpr:
-		b, isBasic := c.info.Types[e.X].Underlying().(*types.Basic)
-		isString := isBasic && b.Info()&types.IsString != 0
 		slice := c.translateExprToType(e.X, exprType)
 		if e.High == nil {
 			if e.Low == nil {
 				return slice
-			}
-			if isString {
-				return fmt.Sprintf("%s.substring(%s)", slice, c.flatten64(e.Low))
 			}
 			return fmt.Sprintf("go$subslice(%s, %s)", slice, c.flatten64(e.Low))
 		}
 		low := "0"
 		if e.Low != nil {
 			low = c.flatten64(e.Low)
-		}
-		if isString {
-			return fmt.Sprintf("%s.substring(%s, %s)", slice, low, c.flatten64(e.High))
 		}
 		if e.Max != nil {
 			return fmt.Sprintf("go$subslice(%s, %s, %s, %s)", slice, low, c.flatten64(e.High), c.flatten64(e.Max))
@@ -575,9 +588,6 @@ func (c *PkgContext) translateExpr(expr ast.Expr) string {
 				case "delete":
 					return fmt.Sprintf(`delete %s[%s]`, c.translateExpr(e.Args[0]), c.makeKey(e.Args[1], c.info.Types[e.Args[0]].Underlying().(*types.Map).Key()))
 				case "copy":
-					if basic, isBasic := c.info.Types[e.Args[1]].Underlying().(*types.Basic); isBasic && basic.Info()&types.IsString != 0 {
-						return fmt.Sprintf("go$copyString(%s, %s)", c.translateExpr(e.Args[0]), c.translateExpr(e.Args[1]))
-					}
 					return fmt.Sprintf("go$copySlice(%s, %s)", c.translateExpr(e.Args[0]), c.translateExpr(e.Args[1]))
 				case "print", "println":
 					return fmt.Sprintf("console.log(%s)", strings.Join(c.translateExprSlice(e.Args, nil), ", "))
@@ -995,14 +1005,14 @@ func (c *PkgContext) translateExprToType(expr ast.Expr, desiredType types.Type) 
 					value = fmt.Sprintf("%s.low", value)
 				}
 				if et.Info()&types.IsNumeric != 0 {
-					return fmt.Sprintf("go$encodeRune(%s)", value)
+					return fmt.Sprintf("new %s(go$encodeRune(%s))", c.typeName(desiredType), value)
 				}
 				return value
 			case *types.Slice:
 				if types.IsIdentical(et.Elem().Underlying(), types.Typ[types.Rune]) {
-					return fmt.Sprintf("go$runesToString(%s)", value)
+					return fmt.Sprintf("new %s(go$runesToString(%s))", c.typeName(desiredType), value)
 				}
-				return fmt.Sprintf("go$bytesToString(%s)", value)
+				return fmt.Sprintf("new %s(go$cloneSlice(%s))", c.typeName(desiredType), value)
 			default:
 				panic(fmt.Sprintf("Unhandled conversion: %v\n", et))
 			}
@@ -1035,7 +1045,7 @@ func (c *PkgContext) translateExprToType(expr ast.Expr, desiredType types.Type) 
 				if types.IsIdentical(t.Elem().Underlying(), types.Typ[types.Rune]) {
 					return fmt.Sprintf("new %s(go$stringToRunes(%s))", c.typeName(desiredType), c.translateExpr(expr))
 				}
-				return fmt.Sprintf("new %s(go$stringToBytes(%s))", c.typeName(desiredType), c.translateExpr(expr))
+				return fmt.Sprintf("new %s(go$cloneSlice(%s))", c.typeName(desiredType), c.translateExpr(expr))
 			}
 		case *types.Array, *types.Pointer:
 			return fmt.Sprintf("new %s(%s)", c.typeName(desiredType), c.translateExpr(expr))

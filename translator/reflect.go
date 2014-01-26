@@ -27,7 +27,6 @@ func init() {
 				case go$pkg.Array:
 				case go$pkg.Map:
 				case go$pkg.Func:
-				case go$pkg.String:
 				case go$pkg.Struct:
 					return true;
 				case go$pkg.Ptr:
@@ -175,7 +174,7 @@ func init() {
 				case go$pkg.Slice:
 					return typ.jsType.nil;
 				case go$pkg.String:
-					return "";
+					return go$emptyString;
 				case go$pkg.Struct:
 					return new typ.jsType.Ptr();
 				default:
@@ -356,7 +355,7 @@ func init() {
 			return new Value.Ptr(typ, val, (v.flag & flagRO) | (typ.Kind() << flagKindShift));
 		}`,
 		"cvtStringBytes": `function(v, typ) {
-			return new Value.Ptr(typ, new typ.jsType(go$stringToBytes(v.iword())), (v.flag & flagRO) | (go$pkg.Slice << flagKindShift));
+			return new Value.Ptr(typ, new typ.jsType(go$cloneSlice(v.iword())), (v.flag & flagRO) | (go$pkg.Slice << flagKindShift));
 		}`,
 		"cvtStringRunes": `function(v, typ) {
 			return new Value.Ptr(typ, new typ.jsType(go$stringToRunes(v.iword())), (v.flag & flagRO) | (go$pkg.Slice << flagKindShift));
@@ -464,7 +463,7 @@ func init() {
 			dst.go$set(src);
 		}`,
 		"methodName": `function() {
-			return "?FIXME?";
+			return go$internalize("?FIXME?", Go$String);
 		}`,
 		"Copy": `function(dst, src) {
 			var dk = dst.kind();

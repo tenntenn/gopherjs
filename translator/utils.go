@@ -196,7 +196,7 @@ func (c *PkgContext) zeroValue(ty types.Type) string {
 		case t.Info()&types.IsNumeric != 0, t.Kind() == types.UnsafePointer:
 			return "0"
 		case t.Info()&types.IsString != 0:
-			return `""`
+			return `go$emptyString`
 		case t.Kind() == types.UntypedNil:
 			panic("Zero value for untyped nil.")
 		default:
@@ -321,7 +321,7 @@ func (c *PkgContext) makeKey(expr ast.Expr, keyType types.Type) string {
 	case *types.Array, *types.Struct:
 		return fmt.Sprintf("(new %s(%s)).go$key()", c.typeName(keyType), c.translateExpr(expr))
 	case *types.Basic:
-		if is64Bit(t) {
+		if t.Info()&types.IsString != 0 || is64Bit(t) {
 			return fmt.Sprintf("%s.go$key()", c.translateExprToType(expr, keyType))
 		}
 		return c.translateExprToType(expr, keyType)
@@ -413,6 +413,8 @@ func toJavaScriptType(t *types.Basic) string {
 	switch t.Kind() {
 	case types.UntypedInt:
 		return "Int"
+	case types.UntypedString:
+		return "String"
 	case types.Byte:
 		return "Uint8"
 	case types.Rune:
@@ -446,7 +448,7 @@ func isBlank(expr ast.Expr) bool {
 func isWrapped(ty types.Type) bool {
 	switch t := ty.Underlying().(type) {
 	case *types.Basic:
-		return !is64Bit(t) && t.Info()&types.IsComplex == 0 && t.Kind() != types.UntypedNil
+		return t.Info()&types.IsString == 0 && !is64Bit(t) && t.Info()&types.IsComplex == 0 && t.Kind() != types.UntypedNil
 	case *types.Array, *types.Map, *types.Signature:
 		return true
 	case *types.Pointer:

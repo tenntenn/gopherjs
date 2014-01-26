@@ -156,7 +156,7 @@ func (c *PkgContext) translateStmt(stmt ast.Stmt, label string) {
 			c.Printf("%sfor (; %s < %s.length; %s += %s[1]) {", label, iVar, refVar, iVar, runeVar)
 			c.Indent(func() {
 				c.handleEscapingVariables(s.Body, func() {
-					c.Printf("%s = go$decodeRune(%s, %s);", runeVar, refVar, iVar)
+					c.Printf("%s = go$decodeRune(function(n) { return %s.array[%s.offset + %s + n]; });", runeVar, refVar, refVar, iVar)
 					if !isBlank(s.Value) {
 						c.Printf("%s;", c.translateAssign(s.Value, runeVar+"[0]"))
 					}
