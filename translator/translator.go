@@ -150,7 +150,7 @@ func (t *Translator) WriteProgramCode(pkgs []*Archive, mainPkgPath string, w *So
 		w.Write([]byte("go$packages[\"" + pkg.ImportPath + "\"].init();\n"))
 	}
 
-	w.Write([]byte("go$packages[\"" + mainPkgPath + "\"].main();\n\n})();\n"))
+	w.Write([]byte("go$packages[\"" + mainPkgPath + "\"].main(function() {});\n\n})();\n"))
 }
 
 func (t *Translator) WritePkgCode(pkg *Archive, w *SourceMapFilter) {

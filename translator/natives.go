@@ -401,8 +401,11 @@ func init() {
 			return null;
 		}`,
 		"NewTimer": `function() { go$notSupported("time.NewTimer (use time.AfterFunc instead)") }`,
-		"Sleep":    `function() { go$notSupported("time.Sleep (use time.AfterFunc instead)") }`,
-		"Tick":     `function() { go$notSupported("time.Tick (use time.AfterFunc instead)") }`,
+		"Sleep": `function(d, callback) {
+			setTimeout(callback, go$div64(d, new Duration(0, 1000000)).low);
+			return GO$BLK;
+		}`,
+		"Tick": `function() { go$notSupported("time.Tick (use time.AfterFunc instead)") }`,
 	}
 
 	pkgNatives["github.com/gopherjs/gopherjs/js"] = map[string]string{

@@ -808,7 +808,20 @@ func (c *funcContext) translateExpr(expr ast.Expr) *expression {
 				return c.formatExpr("(%s = %e, %s(%s))", tupleVar, e.Args[0], fun, strings.Join(c.translateArgs(sig, args, false), ", "))
 			}
 		}
-		return c.formatExpr("%s(%s)", fun, strings.Join(c.translateArgs(sig, e.Args, e.Ellipsis.IsValid()), ", "))
+		args := c.translateArgs(sig, e.Args, e.Ellipsis.IsValid())
+		if c.blockingCalls[e] {
+			callbackCase := c.caseCounter
+			c.caseCounter++
+			returnVar := ""
+			assign := ""
+			if sig.Results().Len() != 0 {
+				returnVar = c.newVariable("r")
+				assign = " " + returnVar + " = go$r;"
+			}
+			c.PrintCond(false, fmt.Sprintf("%s(%s);", fun, strings.Join(args, ", ")), fmt.Sprintf("go$s = %d; go$r = %s(%s); if(go$r === GO$BLK) return; case %d:%s", callbackCase, fun, strings.Join(append(args, "go$f"), ", "), callbackCase, assign))
+			return c.formatExpr("%s", returnVar)
+		}
+		return c.formatExpr("%s(%s)", fun, strings.Join(args, ", "))
 
 	case *ast.StarExpr:
 		if c1, isCall := e.X.(*ast.CallExpr); isCall && len(c1.Args) == 1 {

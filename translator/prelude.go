@@ -14,6 +14,7 @@ if (typeof window !== "undefined") {
 
 var go$idCounter = 0;
 var go$keys = function(m) { return m ? Object.keys(m) : []; };
+var GO$BLK = {};
 var go$min = Math.min;
 var go$parseInt = parseInt;
 var go$parseFloat = parseFloat;
