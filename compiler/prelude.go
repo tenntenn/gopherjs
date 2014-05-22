@@ -3,8 +3,7 @@ package compiler
 var prelude = `
 Error.stackTraceLimit = -1;
 
-var go$global = global;
-if (typeof GLOBAL !== "undefined" && global === GLOBAL) {
+if (typeof GLOBAL !== "undefined" && go$global === GLOBAL) {
     go$global.require = require;
 }
 
