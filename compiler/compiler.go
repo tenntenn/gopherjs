@@ -82,7 +82,7 @@ func (t *Compiler) WriteProgramCode(pkgs []*Archive, mainPkgPath string, w *Sour
 		}
 	}
 
-	w.Write([]byte("\"use strict\";\n(function() {\n\n"))
+	w.Write([]byte("\"use strict\";\n(function(global) {\n\n"))
 	w.Write([]byte(strings.TrimSpace(prelude)))
 	w.Write([]byte("\n"))
 
@@ -150,7 +150,7 @@ func (t *Compiler) WriteProgramCode(pkgs []*Archive, mainPkgPath string, w *Sour
 		w.Write([]byte("go$packages[\"" + string(pkg.ImportPath) + "\"].init();\n"))
 	}
 
-	w.Write([]byte("go$packages[\"" + mainPkgPath + "\"].main();\n\n})();\n"))
+	w.Write([]byte("go$packages[\"" + mainPkgPath + "\"].main();\n\n})(this);\n"))
 }
 
 func (t *Compiler) WritePkgCode(pkg *Archive, w *SourceMapFilter) {

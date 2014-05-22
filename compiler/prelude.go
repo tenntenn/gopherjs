@@ -3,12 +3,9 @@ package compiler
 var prelude = `
 Error.stackTraceLimit = -1;
 
-var go$global;
-if (typeof window !== "undefined") {
-	go$global = window;
-} else if (typeof GLOBAL !== "undefined") {
-	go$global = GLOBAL;
-	go$global.require = require;
+var go$global = global;
+if (typeof GLOBAL !== "undefined" && global === GLOBAL) {
+    go$global.require = require;
 }
 
 var go$idCounter = 0;
